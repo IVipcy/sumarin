@@ -13,7 +13,14 @@ const { SOURCE_TEXT } = require("./source-text");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT_MS = 90000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
+const OPENAI_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+
+function cleanApiKey(key) {
+  if (!key) return "";
+  return key.trim().replace(/^\uFEFF/, "").replace(/^["']|["']$/g, "");
+}
+
+const OPENAI_API_KEY = cleanApiKey(process.env.OPENAI_API_KEY);
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -26,10 +33,45 @@ const openai = OPENAI_API_KEY
     })
   : null;
 
+let apiKeyStatus = {
+  checked: false,
+  valid: false,
+  error: null,
+};
+
+async function validateApiKey() {
+  if (!openai) {
+    apiKeyStatus = {
+      checked: true,
+      valid: false,
+      error: "OPENAI_API_KEY is not set",
+    };
+    return;
+  }
+
+  try {
+    await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [{ role: "user", content: "OK" }],
+      max_tokens: 5,
+    });
+    apiKeyStatus = { checked: true, valid: true, error: null };
+    console.log("OpenAI API key validation: OK");
+  } catch (err) {
+    const message = err.error?.message || err.message;
+    apiKeyStatus = { checked: true, valid: false, error: message };
+    console.error("OpenAI API key validation: FAILED", err.status, message);
+  }
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     apiKeyConfigured: Boolean(OPENAI_API_KEY),
+    apiKeyValid: apiKeyStatus.valid,
+    apiKeyChecked: apiKeyStatus.checked,
+    apiKeyError: apiKeyStatus.error,
+    model: OPENAI_MODEL,
     apiKeyPrefix: OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : null,
   });
 });
@@ -56,6 +98,7 @@ function parseAiJson(content) {
 function toUserError(err) {
   const status = err.status || err.response?.status;
   const code = err.code || err.error?.code;
+  const apiMessage = err.error?.message || err.message;
 
   if (status === 401) {
     return "APIキーが正しくありません。Renderの環境変数 OPENAI_API_KEY を確認してください。";
@@ -66,11 +109,17 @@ function toUserError(err) {
   if (status === 402 || code === "insufficient_quota") {
     return "OpenAIの利用上限に達しています。APIの残高を確認してください。";
   }
-  if (code === "ETIMEDOUT" || err.message?.includes("timeout")) {
+  if (code === "ETIMEDOUT" || apiMessage?.includes("timeout")) {
     return "評価に時間がかかりすぎました。もう一度お試しください。";
   }
-  if (err.message === "AIの回答を読み取れませんでした") {
-    return err.message;
+  if (apiMessage === "AIの回答を読み取れませんでした") {
+    return apiMessage;
+  }
+  if (apiMessage?.includes("model") && status === 404) {
+    return `モデル「${OPENAI_MODEL}」が使えません。OPENAI_MODEL を gpt-4o-mini に設定してください。`;
+  }
+  if (apiMessage && !apiMessage.includes("sk-")) {
+    return `評価エラー: ${apiMessage}`;
   }
 
   return "評価中にエラーが発生しました。もう一度お試しください。";
@@ -87,6 +136,11 @@ app.post("/api/evaluate", async (req, res) => {
       .status(500)
       .json({ error: "OpenAI APIキーが設定されていません" });
   }
+  if (apiKeyStatus.checked && !apiKeyStatus.valid) {
+    return res.status(500).json({
+      error: `OpenAI APIキーに問題があります: ${apiKeyStatus.error}`,
+    });
+  }
 
   const userMessage = `【子どもが書いた要約】
 ${summaryText.trim()}
@@ -95,7 +149,7 @@ ${summaryText.trim()}
 
   try {
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      model: OPENAI_MODEL,
       messages: [
         { role: "system", content: buildSystemPrompt(SOURCE_TEXT) },
         { role: "user", content: userMessage },
@@ -116,7 +170,11 @@ ${summaryText.trim()}
 
     res.json(result);
   } catch (err) {
-    console.error("Evaluation error:", err.status || err.code, err.message);
+    console.error(
+      "Evaluation error:",
+      err.status || err.code,
+      err.error?.message || err.message
+    );
     res.status(500).json({ error: toUserError(err) });
   }
 });
@@ -127,18 +185,9 @@ app.get("*", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Sumarin app running on port ${PORT}`);
-  console.log(`OpenAI API key: ${OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
-
-  if (openai) {
-    openai.models
-      .list()
-      .then(() => console.log("OpenAI API key validation: OK"))
-      .catch((err) =>
-        console.error(
-          "OpenAI API key validation: FAILED",
-          err.status,
-          err.error?.message || err.message
-        )
-      );
-  }
+  console.log(`OpenAI model: ${OPENAI_MODEL}`);
+  console.log(
+    `OpenAI API key: ${OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : "NOT SET"}`
+  );
+  validateApiKey();
 });
