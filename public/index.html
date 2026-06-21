@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ようやくチェッカー ✨</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-shapes">
+      <div class="shape shape-1"></div>
+      <div class="shape shape-2"></div>
+      <div class="shape shape-3"></div>
+    </div>
+
+    <div class="container">
+      <header class="header">
+        <div class="mascot">📸</div>
+        <h1>ようやくチェッカー</h1>
+        <p class="subtitle">「アップとルーズで伝える」の要約をチェックしよう！</p>
+      </header>
+
+      <main>
+        <section class="card input-section">
+          <h2>① 書いた要約を入れよう</h2>
+
+          <div class="field-group">
+            <label for="summaryText">書いた要約</label>
+            <textarea
+              id="summaryText"
+              rows="6"
+              placeholder="「アップとルーズで伝える」の要約をここに書くか、ファイルをアップロードしよう"
+            ></textarea>
+            <div class="summary-meta">
+              <span id="charCount">0字</span>
+              <label class="upload-btn upload-btn-pink">
+                📂 要約ファイルを選ぶ
+                <input type="file" id="summaryFile" accept=".txt" hidden />
+              </label>
+            </div>
+          </div>
+
+          <button id="evaluateBtn" class="evaluate-btn">
+            ⭐ 評価する！
+          </button>
+        </section>
+
+        <section id="loading" class="loading hidden">
+          <div class="spinner"></div>
+          <p>先生がチェック中…</p>
+        </section>
+
+        <section id="results" class="card results-section hidden">
+          <h2>② 評価結果</h2>
+
+          <div class="overall-grade">
+            <div id="gradeBadge" class="grade-badge">A</div>
+            <p id="overallComment" class="overall-comment"></p>
+          </div>
+
+          <div id="axesResults" class="axes-results"></div>
+
+          <div class="improved-section">
+            <h3>✏️ こう書くともっとよくなるよ！</h3>
+            <div id="improvedSummary" class="improved-text"></div>
+            <p id="improvedMeta" class="improved-meta"></p>
+          </div>
+        </section>
+
+        <section id="error" class="error-box hidden"></section>
+      </main>
+
+      <footer>
+        <p>小4 国語「アップとルーズで伝える」／要約するとき</p>
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
