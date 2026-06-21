@@ -221,16 +221,8 @@ input[type="number"]:focus {
   transform: scale(1.03);
 }
 
-.summary-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
+.char-count {
   margin-top: 10px;
-}
-
-#charCount {
   font-weight: 700;
   color: var(--purple);
   font-size: 1.1rem;

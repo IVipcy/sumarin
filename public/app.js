@@ -1,5 +1,4 @@
 const summaryText = document.getElementById("summaryText");
-const summaryFile = document.getElementById("summaryFile");
 const evaluateBtn = document.getElementById("evaluateBtn");
 const charCount = document.getElementById("charCount");
 const loading = document.getElementById("loading");
@@ -11,22 +10,13 @@ const axesResults = document.getElementById("axesResults");
 const improvedSummary = document.getElementById("improvedSummary");
 const improvedMeta = document.getElementById("improvedMeta");
 
+const REQUEST_TIMEOUT_MS = 90000;
+
 function updateCharCount() {
   charCount.textContent = `${summaryText.value.length}字`;
 }
 
 summaryText.addEventListener("input", updateCharCount);
-
-summaryFile.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    summaryText.value = ev.target.result;
-    updateCharCount();
-  };
-  reader.readAsText(file, "UTF-8");
-});
 
 function showError(message) {
   errorBox.textContent = message;
@@ -75,6 +65,16 @@ function renderResults(data) {
   results.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 evaluateBtn.addEventListener("click", async () => {
   hideError();
 
@@ -88,13 +88,18 @@ evaluateBtn.addEventListener("click", async () => {
   results.classList.add("hidden");
 
   try {
-    const res = await fetch("/api/evaluate", {
+    const res = await fetchWithTimeout("/api/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ summaryText: summaryText.value }),
     });
 
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error("サーバーからの応答を読み取れませんでした");
+    }
 
     if (!res.ok) {
       throw new Error(data.error || "評価に失敗しました");
@@ -102,7 +107,11 @@ evaluateBtn.addEventListener("click", async () => {
 
     renderResults(data);
   } catch (err) {
-    showError(err.message);
+    if (err.name === "AbortError") {
+      showError("評価に時間がかかりすぎました。もう一度お試しください。");
+    } else {
+      showError(err.message);
+    }
   } finally {
     evaluateBtn.disabled = false;
     loading.classList.add("hidden");

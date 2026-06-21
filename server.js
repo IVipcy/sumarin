@@ -12,9 +12,25 @@ const { SOURCE_TEXT } = require("./source-text");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const REQUEST_TIMEOUT_MS = 90000;
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: 2,
+    })
+  : null;
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    apiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+  });
+});
 
 app.get("/api/info", (_req, res) => {
   res.json({
@@ -25,19 +41,50 @@ app.get("/api/info", (_req, res) => {
   });
 });
 
+function parseAiJson(content) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error("AIの回答を読み取れませんでした");
+  }
+}
+
+function toUserError(err) {
+  const status = err.status || err.response?.status;
+  const code = err.code || err.error?.code;
+
+  if (status === 401) {
+    return "APIキーが正しくありません。Renderの環境変数 OPENAI_API_KEY を確認してください。";
+  }
+  if (status === 429) {
+    return "ただいま混み合っています。30秒ほど待ってからもう一度お試しください。";
+  }
+  if (status === 402 || code === "insufficient_quota") {
+    return "OpenAIの利用上限に達しています。APIの残高を確認してください。";
+  }
+  if (code === "ETIMEDOUT" || err.message?.includes("timeout")) {
+    return "評価に時間がかかりすぎました。もう一度お試しください。";
+  }
+  if (err.message === "AIの回答を読み取れませんでした") {
+    return err.message;
+  }
+
+  return "評価中にエラーが発生しました。もう一度お試しください。";
+}
+
 app.post("/api/evaluate", async (req, res) => {
   const { summaryText } = req.body;
 
   if (!summaryText?.trim()) {
     return res.status(400).json({ error: "要約を入力してください" });
   }
-  if (!process.env.OPENAI_API_KEY) {
+  if (!openai) {
     return res
       .status(500)
       .json({ error: "OpenAI APIキーが設定されていません" });
   }
-
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   const userMessage = `【子どもが書いた要約】
 ${summaryText.trim()}
@@ -60,17 +107,15 @@ ${summaryText.trim()}
       throw new Error("AIからの応答がありませんでした");
     }
 
-    const result = JSON.parse(content);
+    const result = parseAiJson(content);
     result.submittedCharacterCount = summaryText.trim().length;
     result.sourceTitle = SOURCE_TEXT.title;
     result.gradeDescriptions = GRADE_DESCRIPTIONS;
 
     res.json(result);
   } catch (err) {
-    console.error("Evaluation error:", err.message);
-    res.status(500).json({
-      error: "評価中にエラーが発生しました。もう一度お試しください。",
-    });
+    console.error("Evaluation error:", err.status || err.code, err.message);
+    res.status(500).json({ error: toUserError(err) });
   }
 });
 
@@ -80,4 +125,5 @@ app.get("*", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Sumarin app running on port ${PORT}`);
+  console.log(`OpenAI API key: ${process.env.OPENAI_API_KEY ? "configured" : "NOT SET"}`);
 });

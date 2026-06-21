@@ -58,9 +58,6 @@ function buildSystemPrompt(sourceText) {
 【もとの文章の要点】
 ${keyPointsList}
 
-【もとの文章 全文】
-${sourceText.body}
-
 【評価軸】（各軸をA/B/C/Dで評価。axes配列にはこの4つすべてを含める）
 ${axisList}
 

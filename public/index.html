@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ようやくチェッカー ✨</title>
+    <title>要約チェッカーさまりん ✨</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -22,7 +22,7 @@
     <div class="container">
       <header class="header">
         <div class="mascot">📸</div>
-        <h1>ようやくチェッカー</h1>
+        <h1>要約チェッカーさまりん</h1>
         <p class="subtitle">「アップとルーズで伝える」の要約をチェックしよう！</p>
       </header>
 
@@ -35,15 +35,9 @@
             <textarea
               id="summaryText"
               rows="6"
-              placeholder="「アップとルーズで伝える」の要約をここに書くか、ファイルをアップロードしよう"
+              placeholder="「アップとルーズで伝える」の要約をここに書こう"
             ></textarea>
-            <div class="summary-meta">
-              <span id="charCount">0字</span>
-              <label class="upload-btn upload-btn-pink">
-                📂 要約ファイルを選ぶ
-                <input type="file" id="summaryFile" accept=".txt" hidden />
-              </label>
-            </div>
+            <p id="charCount" class="char-count">0字</p>
           </div>
 
           <button id="evaluateBtn" class="evaluate-btn">
@@ -53,7 +47,7 @@
 
         <section id="loading" class="loading hidden">
           <div class="spinner"></div>
-          <p>先生がチェック中…</p>
+          <p>さまりんがチェック中…</p>
         </section>
 
         <section id="results" class="card results-section hidden">
