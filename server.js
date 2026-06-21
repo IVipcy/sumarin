@@ -13,13 +13,14 @@ const { SOURCE_TEXT } = require("./source-text");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const REQUEST_TIMEOUT_MS = 90000;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const openai = process.env.OPENAI_API_KEY
+const openai = OPENAI_API_KEY
   ? new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: OPENAI_API_KEY,
       timeout: REQUEST_TIMEOUT_MS,
       maxRetries: 2,
     })
@@ -28,7 +29,8 @@ const openai = process.env.OPENAI_API_KEY
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    apiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+    apiKeyConfigured: Boolean(OPENAI_API_KEY),
+    apiKeyPrefix: OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : null,
   });
 });
 
@@ -125,5 +127,18 @@ app.get("*", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Sumarin app running on port ${PORT}`);
-  console.log(`OpenAI API key: ${process.env.OPENAI_API_KEY ? "configured" : "NOT SET"}`);
+  console.log(`OpenAI API key: ${OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : "NOT SET"}`);
+
+  if (openai) {
+    openai.models
+      .list()
+      .then(() => console.log("OpenAI API key validation: OK"))
+      .catch((err) =>
+        console.error(
+          "OpenAI API key validation: FAILED",
+          err.status,
+          err.error?.message || err.message
+        )
+      );
+  }
 });
