@@ -12,8 +12,9 @@ const { SOURCE_TEXT } = require("./source-text");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const REQUEST_TIMEOUT_MS = 90000;
+const REQUEST_TIMEOUT_MS = 120000;
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+const MAX_ATTEMPTS = 4;
 
 function cleanApiKey(key) {
   if (!key) return "";
@@ -29,7 +30,7 @@ const openai = OPENAI_API_KEY
   ? new OpenAI({
       apiKey: OPENAI_API_KEY,
       timeout: REQUEST_TIMEOUT_MS,
-      maxRetries: 2,
+      maxRetries: 0,
     })
   : null;
 
@@ -37,7 +38,47 @@ let apiKeyStatus = {
   checked: false,
   valid: false,
   error: null,
+  networkIssue: false,
 };
+
+function isNetworkError(err) {
+  const message = err.error?.message || err.message || "";
+  return (
+    message.includes("Premature close") ||
+    message.includes("ECONNRESET") ||
+    message.includes("ETIMEDOUT") ||
+    message.includes("fetch failed") ||
+    message.includes("socket hang up") ||
+    err.code === "ETIMEDOUT" ||
+    err.code === "ECONNRESET"
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function createCompletionWithRetry(params) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await openai.chat.completions.create(params);
+    } catch (err) {
+      lastError = err;
+      const retryable = isNetworkError(err) || err.status === 429;
+      console.error(
+        `OpenAI attempt ${attempt}/${MAX_ATTEMPTS} failed:`,
+        err.status || err.code,
+        err.error?.message || err.message
+      );
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+      await sleep(1000 * attempt);
+    }
+  }
+
+  throw lastError;
+}
 
 async function validateApiKey() {
   if (!openai) {
@@ -45,21 +86,29 @@ async function validateApiKey() {
       checked: true,
       valid: false,
       error: "OPENAI_API_KEY is not set",
+      networkIssue: false,
     };
     return;
   }
 
   try {
-    await openai.chat.completions.create({
-      model: OPENAI_MODEL,
-      messages: [{ role: "user", content: "OK" }],
-      max_tokens: 5,
-    });
-    apiKeyStatus = { checked: true, valid: true, error: null };
+    await openai.models.list();
+    apiKeyStatus = {
+      checked: true,
+      valid: true,
+      error: null,
+      networkIssue: false,
+    };
     console.log("OpenAI API key validation: OK");
   } catch (err) {
     const message = err.error?.message || err.message;
-    apiKeyStatus = { checked: true, valid: false, error: message };
+    const networkIssue = isNetworkError(err);
+    apiKeyStatus = {
+      checked: true,
+      valid: !networkIssue && err.status !== 401 && err.status !== 403,
+      error: message,
+      networkIssue,
+    };
     console.error("OpenAI API key validation: FAILED", err.status, message);
   }
 }
@@ -71,6 +120,7 @@ app.get("/api/health", (_req, res) => {
     apiKeyValid: apiKeyStatus.valid,
     apiKeyChecked: apiKeyStatus.checked,
     apiKeyError: apiKeyStatus.error,
+    networkIssue: apiKeyStatus.networkIssue,
     model: OPENAI_MODEL,
     apiKeyPrefix: OPENAI_API_KEY ? OPENAI_API_KEY.slice(0, 8) + "..." : null,
   });
@@ -109,6 +159,9 @@ function toUserError(err) {
   if (status === 402 || code === "insufficient_quota") {
     return "OpenAIの利用上限に達しています。APIの残高を確認してください。";
   }
+  if (isNetworkError(err)) {
+    return "OpenAIへの接続が途切れました。10秒ほど待ってからもう一度お試しください。";
+  }
   if (code === "ETIMEDOUT" || apiMessage?.includes("timeout")) {
     return "評価に時間がかかりすぎました。もう一度お試しください。";
   }
@@ -117,9 +170,6 @@ function toUserError(err) {
   }
   if (apiMessage?.includes("model") && status === 404) {
     return `モデル「${OPENAI_MODEL}」が使えません。OPENAI_MODEL を gpt-4o-mini に設定してください。`;
-  }
-  if (apiMessage && !apiMessage.includes("sk-")) {
-    return `評価エラー: ${apiMessage}`;
   }
 
   return "評価中にエラーが発生しました。もう一度お試しください。";
@@ -136,9 +186,13 @@ app.post("/api/evaluate", async (req, res) => {
       .status(500)
       .json({ error: "OpenAI APIキーが設定されていません" });
   }
-  if (apiKeyStatus.checked && !apiKeyStatus.valid) {
+  if (
+    apiKeyStatus.checked &&
+    !apiKeyStatus.valid &&
+    !apiKeyStatus.networkIssue
+  ) {
     return res.status(500).json({
-      error: `OpenAI APIキーに問題があります: ${apiKeyStatus.error}`,
+      error: `OpenAI APIキーが無効です。Renderの OPENAI_API_KEY を確認してください。`,
     });
   }
 
@@ -148,7 +202,7 @@ ${summaryText.trim()}
 【要約の字数】${summaryText.trim().length}字`;
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await createCompletionWithRetry({
       model: OPENAI_MODEL,
       messages: [
         { role: "system", content: buildSystemPrompt(SOURCE_TEXT) },
