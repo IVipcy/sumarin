@@ -7,6 +7,7 @@ const {
   EVALUATION_AXES,
   GRADE_DESCRIPTIONS,
   buildSystemPrompt,
+  judgeLength,
 } = require("./evaluation-criteria");
 const { SOURCE_TEXT } = require("./source-text");
 
@@ -130,10 +131,72 @@ app.get("/api/info", (_req, res) => {
   res.json({
     title: SOURCE_TEXT.title,
     author: SOURCE_TEXT.author,
+    targetLength: SOURCE_TEXT.targetLength,
     axes: EVALUATION_AXES,
     gradeDescriptions: GRADE_DESCRIPTIONS,
   });
 });
+
+// 評価はA/B/Cの3段階。万一Dなどが返ってきたらCに丸める
+function normalizeGrade(grade) {
+  const g = String(grade || "").trim().toUpperCase();
+  if (g === "A" || g === "B") return g;
+  return "C";
+}
+
+const ELEMENT_IDS = ["current_state", "generalization", "author_claim"];
+
+/**
+ * ルーブリックに沿って全体評価を決める（AIの軸ごとの評価＋字数判定から機械的に決定）
+ *  - ①現状・危機 または ③筆者の主張 がC → C
+ *  - 字数が大幅に過不足 → C
+ *  - 字数が少し過不足 → B（上限）
+ *  - ①②③すべてA かつ ④がC以外 → A、それ以外 → B
+ */
+function computeOverallGrade(axes, lengthStatus, fallback) {
+  const byId = Object.fromEntries((axes || []).map((a) => [a.id, a.grade]));
+  if (ELEMENT_IDS.some((id) => !byId[id])) return fallback;
+
+  if (byId.current_state === "C" || byId.author_claim === "C") return "C";
+  if (lengthStatus === "far") return "C";
+  if (lengthStatus === "near") return "B";
+
+  const allElementsA = ELEMENT_IDS.every((id) => byId[id] === "A");
+  if (allElementsA && byId.structure_length !== "C") return "A";
+  return "B";
+}
+
+/**
+ * 修正例が目安の字数から外れていたら、1回だけ書き直しをたのむ
+ */
+async function fitImprovedSummary(summary, targetLength) {
+  const { min, max } = targetLength;
+  const len = (summary || "").length;
+  if (!summary || (len >= min && len <= max)) return summary;
+
+  try {
+    const completion = await createCompletionWithRetry({
+      model: OPENAI_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `あなたは小学校4年生の国語の先生です。次の「${SOURCE_TEXT.title}」の要約文を、内容を保ったまま、必ず${min}字以上${max}字以下に書き直してください。${len < min ? "3つの必須要素（工芸品のよさと現状の危機、具体例からの一般化、筆者の主張）がそれぞれ1〜2文になるように、ていねいに言葉を足してください。" : "大事な内容を残して、言葉を削ってください。"}小4が書く自然な文章にし、感想は入れないでください。
+必ず {"improvedSummary": "..."} のJSONのみで返答してください。`,
+        },
+        { role: "user", content: summary },
+      ],
+      temperature: 0.4,
+      response_format: { type: "json_object" },
+    });
+    const fixed = parseAiJson(completion.choices[0]?.message?.content || "{}");
+    if (fixed.improvedSummary && typeof fixed.improvedSummary === "string") {
+      return fixed.improvedSummary;
+    }
+  } catch (err) {
+    console.error("Improved summary rewrite failed:", err.message);
+  }
+  return summary;
+}
 
 function parseAiJson(content) {
   try {
@@ -196,10 +259,14 @@ app.post("/api/evaluate", async (req, res) => {
     });
   }
 
+  const submittedCount = summaryText.trim().length;
+  const lengthJudgement = judgeLength(submittedCount, SOURCE_TEXT.targetLength);
+
   const userMessage = `【子どもが書いた要約】
 ${summaryText.trim()}
 
-【要約の字数】${summaryText.trim().length}字`;
+【要約の字数】${submittedCount}字
+【字数判定】${lengthJudgement.label}`;
 
   try {
     const completion = await createCompletionWithRetry({
@@ -218,7 +285,26 @@ ${summaryText.trim()}
     }
 
     const result = parseAiJson(content);
-    result.submittedCharacterCount = summaryText.trim().length;
+    result.overallGrade = normalizeGrade(result.overallGrade);
+    result.axes = (result.axes || []).map((axis) => ({
+      ...axis,
+      grade: normalizeGrade(axis.grade),
+    }));
+    result.aiOverallGrade = result.overallGrade;
+    result.overallGrade = computeOverallGrade(
+      result.axes,
+      lengthJudgement.status,
+      result.overallGrade
+    );
+    result.improvedSummary = await fitImprovedSummary(
+      result.improvedSummary,
+      SOURCE_TEXT.targetLength
+    );
+    result.characterCount = (result.improvedSummary || "").length;
+    result.submittedCharacterCount = submittedCount;
+    result.lengthStatus = lengthJudgement.status;
+    result.lengthLabel = lengthJudgement.label;
+    result.targetLength = SOURCE_TEXT.targetLength;
     result.sourceTitle = SOURCE_TEXT.title;
     result.gradeDescriptions = GRADE_DESCRIPTIONS;
 

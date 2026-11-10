@@ -1,87 +1,127 @@
 /**
- * 教科書「要約するとき」に基づく評価軸
- * 「アップとルーズで伝える」の要約採点用
+ * 「未来につなぐ工芸品」200字要約の評価規準（ルーブリック）
+ *
+ * 3つの必須要素（初め・中・終わり）がすべて入っているかを中心に、
+ * 字数（160〜200字）と文章のまとまりを見て、A/B/Cの3段階で評価する。
  */
 
-const EVALUATION_AXES = [
+const ELEMENT_AXES = [
   {
-    id: "core_selection",
-    name: "要点の選択",
+    id: "current_state",
+    name: "① 工芸品のよさ・現状",
     description:
-      "段落や部分の中心となる文・くり返し出る言葉（アップ・ルーズ）を使って、大切な情報を選べているか",
-    textbookRef: "説明する文章を要約するとき：中心となる文・くり返し出る言葉",
+      "工芸品には独自のよさがあるが、今は衰退の危機にあること（原材料の不足・後継者不足など）が書けているか",
   },
   {
-    id: "clarity",
-    name: "知らない人への伝わりやすさ",
+    id: "generalization",
+    name: "② 具体例からの一般化",
     description:
-      "「アップとルーズで伝える」を読んでいない人にも、内容が正しく・わかりやすく伝わるか",
-    textbookRef: "知らない人にも正しく内容が伝わるようにする",
+      "具体例の名前を並べるだけでなく、職人の工夫・地域の文化や知恵・環境への配慮などが詰まっている、とまとめられているか",
   },
   {
-    id: "objectivity",
-    name: "事実と感想の区別",
+    id: "author_claim",
+    name: "③ 筆者の主張",
     description:
-      "元の文章の内容と、自分の感想・意見を分けられているか（末尾に少し感想があっても、要約部分がしっかり書けていれば大きく減点しない）",
-    textbookRef: "要約した部分と自分の感想・意見を区別する",
-  },
-  {
-    id: "structure",
-    name: "構成・文のつながり",
-    description:
-      "文同士が論理的につながっており、アップとルーズのちがいや筆者の主張が伝わるか",
-    textbookRef: "文同士が論理的につながっているか確かめる",
+      "私たちが魅力を理解し、生活に取り入れるなどして、工芸品を未来へつないでいくべきだという主張が書けているか",
   },
 ];
 
-const GRADE_DESCRIPTIONS = {
-  A: "とてもよくできている！このままがんばろう",
-  B: "よくできている。少し直すともっとよくなるよ",
-  C: "がんばっているね。足りないところを直そう",
-  D: "もう一度、中心となる文を考えて書き直してみよう",
+const STRUCTURE_AXIS = {
+  id: "structure_length",
+  name: "④ まとまり・字数",
+  description:
+    "指示語や接続語が適切に使われ、1つのまとまった文章として160〜200字で簡潔に書けているか",
 };
 
+const EVALUATION_AXES = [...ELEMENT_AXES, STRUCTURE_AXIS];
+
+const GRADE_DESCRIPTIONS = {
+  A: "十分満足！3つの大事な内容がそろっているよ",
+  B: "おおむね満足。足りない内容を足すともっとよくなるよ",
+  C: "努力を要する。大事な内容や字数をもう一度見直そう",
+};
+
+/**
+ * 字数の判定（サーバー側で決めてAIに渡す）
+ */
+function judgeLength(count, targetLength) {
+  const { min, max } = targetLength;
+  if (count >= min && count <= max) {
+    return { status: "ok", label: `${min}〜${max}字の範囲内` };
+  }
+  const farBelow = count < Math.round(min * 0.75);
+  const farAbove = count > Math.round(max * 1.2);
+  if (farBelow || farAbove) {
+    return {
+      status: "far",
+      label: `${min}〜${max}字から大幅に${count < min ? "不足" : "超過"}（${count}字）`,
+    };
+  }
+  return {
+    status: "near",
+    label: `${min}〜${max}字から少し${count < min ? "不足" : "超過"}（${count}字）`,
+  };
+}
+
 function buildSystemPrompt(sourceText) {
+  const elementList = sourceText.requiredElements
+    .map(
+      (e, i) =>
+        `${i + 1}. ${e.name}（id: ${e.id}）\n   内容：${e.description}\n   見るところ：${e.hint}`
+    )
+    .join("\n");
+
   const axisList = EVALUATION_AXES.map(
     (a, i) => `${i + 1}. ${a.name}（id: ${a.id}）：${a.description}`
   ).join("\n");
 
-  const keyPointsList = sourceText.keyPoints
-    .map((p, i) => `${i + 1}. ${p}`)
-    .join("\n");
-
-  const referenceExample = sourceText.referenceExampleA || "";
+  const cPatternList = sourceText.cPatterns.map((p) => `- ${p}`).join("\n");
+  const { min, max, label } = sourceText.targetLength;
 
   return `あなたは日本の小学校4年生の国語の先生です。
-子どもが書いた「${sourceText.title}」（${sourceText.author}）の要約（ようやく）を、教科書「要約するとき」の基準でやさしく評価してください。
-小4の練習として、よくできている子どもを励ます採点を心がけてください。厳しすぎないでください。
+子どもが書いた「${sourceText.title}」（${sourceText.author}）の200字要約（ようやく）を、下のルーブリック（評価規準）に基づいて評価してください。
+小4の子どもを励ます、やさしい言葉づかいで評価してください。ただし、評価のA/B/Cはルーブリックに忠実に決めてください。
 
-【もとの文章のタイトル】${sourceText.title}（${sourceText.author}）
+【もとの文章】${sourceText.title}（${sourceText.author}）
+文章全体は「初め」「中」「終わり」の構成で、要約では次の3つの必須要素（核心）がすべて入っているかを見ます。
 
-【もとの文章の要点】（6つ）
-${keyPointsList}
+【3つの必須要素】
+${elementList}
 
-【Aの参考例（教科書「要約した部分」）】
-この例と同程度の内容が書けていれば、全体評価はAにしてください。
-${referenceExample}
+【Aの参考例（約${sourceText.referenceExampleA.length}字）】
+この例と同程度の内容・まとまりで書けていれば、全体評価はAにしてください。
+${sourceText.referenceExampleA}
 
-【評価軸】（各軸をA/B/C/Dで評価。axes配列にはこの4つすべてを含める）
+【全体評価の基準（A/B/Cの3段階。Dは使わない）】
+- A（十分満足）：3つの必須要素がすべて含まれており、指示語や接続語が適切に使われ、1つのまとまった文章として${label}で簡潔に表現できている。
+- B（おおむね満足）：3つの必須要素のうち、少なくとも「① 現状・危機」と「③ 筆者の主張（未来につなぐ）」の2点が含まれており、字数が${label}を満たしている。3要素そろっていても、字数が少し範囲から外れている場合はB。
+- C（努力を要する）：次のいずれかに当てはまる。
+${cPatternList}
+
+【字数の扱い】
+- 字数の判定はユーザーメッセージの【字数判定】に書いてあるので、それに従ってください（自分で数え直さない）。
+- 「範囲内」なら字数で減点しない。
+- 「少し不足／超過」なら、全体評価はBが上限（内容がそろっていればB）。
+- 「大幅に不足／超過」なら、全体評価はC。
+
+【評価軸】（各軸をA/B/Cで評価。axes配列にはこの4つすべてを、この順番で含める）
 ${axisList}
+- ①〜③は、その要素が十分書けていればA、部分的（例：よさは書けているが危機が抜けている）ならB、ほとんど書けていなければC。
+- ④は、字数判定とまとまり（接続語・指示語・文のつながり）から決める。
 
-【採点の基準（やさしめ）】
-- 【要点の選択】上記6つの要点のうち、3つ以上書けていればAも十分あり
-- 【事実と感想の区別】要約の大部分が本文の内容ならA。末尾に「〜と思いました」など感想が少しあるだけなら、大きく減点しない（B以下に下げない）
-- 【全体評価】要点3つ以上＋アップとルーズのちがいが書けていれば、原則A。教科書の参考例と同程度ならA
-- 感想だけで本文の内容がほとんどない場合のみ、CまたはD
-- 各軸でよくできている部分はしっかりほめる
+【言葉の違いについて】
+- 必須要素は「同じ言葉」でなくてよい。意味が合っていれば認める（例：「後継者難」→「作る人が減っている」、「未来へつなぐ」→「これからも残していく」）。
+- 具体例（奈良墨・南部鉄器など）が少し入っているのは問題ない。具体例の説明ばかりで一般化や主張がない場合だけCにする。
+- ただし「② 具体例からの一般化」は、具体例の作り方や様子の説明だけでは認めない。「職人の工夫」「地域の文化や知恵」「自然の材料・環境への配慮」のように、具体例から言える共通点が書けていて初めてA。作り方の説明だけなら②はB、②がBなら全体評価もB。
+- 末尾に短い感想が少しあっても、要約の部分がしっかりしていれば大きく減点しない。
 
-【評価のポイント】
-- 小4の子どもにわかるやさしい言葉でフィードバックする
-- 各評価軸ごとに、よかった点（goodPoints）と直した方がよい点（improvePoints）を1〜2文ずつ書く
-- 直した方がよい点は、本当に大切なことだけに絞る（細かい完璧主義は避ける）
-- 全体評価（overallGrade）は各軸を総合してA/B/C/Dで決める
-- 修正例（improvedSummary）は、もとの文章の内容をもとに、子どもが書きやすい自然な要約文にする
-- 修正例は100字程度を目安にするが、内容の正確さを優先する
+【フィードバックの書き方】
+- 小4の子どもにわかるやさしい言葉で書く
+- 各評価軸ごとに、よかった点（goodPoints）と直した方がよい点（improvePoints）を1〜2文ずつ書く。十分できている軸のimprovePointsは「このままでOK！」のように短くてよい
+- 直した方がよい点は、本当に大切なこと（抜けている必須要素・字数）に絞る
+- 修正例（improvedSummary）は、子どもの要約をいかしつつ、3つの必須要素がそろった自然な要約文にする。感想は入れない
+- 修正例の字数は必ず${min}字以上${max}字以下にする（短くなりすぎないよう、①②③をそれぞれ1〜2文ずつ書く。Aの参考例と同じくらいの長さが目安）
+- characterCount には修正例の字数を入れる
 
 必ず以下のJSON形式のみで返答してください（他の文字は含めない）:
 {
@@ -97,7 +137,7 @@ ${axisList}
     }
   ],
   "improvedSummary": "修正例の要約文",
-  "characterCount": 95
+  "characterCount": 190
 }`;
 }
 
@@ -105,4 +145,5 @@ module.exports = {
   EVALUATION_AXES,
   GRADE_DESCRIPTIONS,
   buildSystemPrompt,
+  judgeLength,
 };

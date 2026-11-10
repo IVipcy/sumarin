@@ -11,9 +11,15 @@ const improvedSummary = document.getElementById("improvedSummary");
 const improvedMeta = document.getElementById("improvedMeta");
 
 const REQUEST_TIMEOUT_MS = 90000;
+const TARGET_MIN = 160;
+const TARGET_MAX = 200;
 
 function updateCharCount() {
-  charCount.textContent = `${summaryText.value.length}字`;
+  const count = summaryText.value.length;
+  const inRange = count >= TARGET_MIN && count <= TARGET_MAX;
+  charCount.textContent = `${count}字（目安：${TARGET_MIN}〜${TARGET_MAX}字）`;
+  charCount.classList.toggle("in-range", inRange);
+  charCount.classList.toggle("out-of-range", count > 0 && !inRange);
 }
 
 summaryText.addEventListener("input", updateCharCount);
@@ -59,7 +65,8 @@ function renderResults(data) {
   });
 
   improvedSummary.textContent = data.improvedSummary || "";
-  improvedMeta.textContent = `修正例：${data.characterCount || data.improvedSummary?.length || 0}字　／　あなたの要約：${data.submittedCharacterCount}字`;
+  const lengthNote = data.lengthLabel ? `（${data.lengthLabel}）` : "";
+  improvedMeta.textContent = `修正例：${data.improvedSummary?.length || data.characterCount || 0}字　／　あなたの要約：${data.submittedCharacterCount}字${lengthNote}`;
 
   results.classList.remove("hidden");
   results.scrollIntoView({ behavior: "smooth", block: "start" });

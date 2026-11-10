@@ -449,3 +449,12 @@ footer {
     font-size: 1.1rem;
   }
 }
+
+.char-count.in-range {
+  color: #2e9e5b;
+  font-weight: 700;
+}
+
+.char-count.out-of-range {
+  color: #d9822b;
+}
