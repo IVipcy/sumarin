@@ -286,10 +286,17 @@ ${summaryText.trim()}
 
     const result = parseAiJson(content);
     result.overallGrade = normalizeGrade(result.overallGrade);
-    result.axes = (result.axes || []).map((axis) => ({
-      ...axis,
-      grade: normalizeGrade(axis.grade),
-    }));
+    const axisDefs = Object.fromEntries(EVALUATION_AXES.map((a) => [a.id, a]));
+    result.axes = (result.axes || []).map((axis) => {
+      const def = axisDefs[axis.id] || {};
+      return {
+        ...axis,
+        name: def.name || axis.name,
+        part: def.part || "",
+        check: def.check || "",
+        grade: normalizeGrade(axis.grade),
+      };
+    });
     result.aiOverallGrade = result.overallGrade;
     result.overallGrade = computeOverallGrade(
       result.axes,

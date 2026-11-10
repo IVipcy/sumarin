@@ -5,6 +5,7 @@ const loading = document.getElementById("loading");
 const results = document.getElementById("results");
 const errorBox = document.getElementById("error");
 const gradeBadge = document.getElementById("gradeBadge");
+const gradeLabel = document.getElementById("gradeLabel");
 const overallComment = document.getElementById("overallComment");
 const axesResults = document.getElementById("axesResults");
 const improvedSummary = document.getElementById("improvedSummary");
@@ -36,16 +37,43 @@ function hideError() {
 
 function renderAxisCard(axis) {
   const card = document.createElement("div");
-  card.className = "axis-card";
+  card.className = `axis-card axis-${axis.grade}`;
+  const part = axis.part
+    ? `<span class="axis-part">${escapeHtml(axis.part)}</span>`
+    : "";
+  const check = axis.check
+    ? `<p class="axis-check">${escapeHtml(axis.check)}</p>`
+    : "";
   card.innerHTML = `
     <div class="axis-header">
-      <span class="axis-name">${escapeHtml(axis.name)}</span>
+      <span class="axis-name">${part}${escapeHtml(axis.name)}</span>
       <span class="axis-grade grade-${axis.grade}">${axis.grade}</span>
     </div>
-    <p class="axis-good">${escapeHtml(axis.goodPoints)}</p>
-    <p class="axis-improve">${escapeHtml(axis.improvePoints)}</p>
+    ${check}
+    <p class="axis-good">${escapeHtml(axis.goodPoints || "")}</p>
+    <p class="axis-improve">${escapeHtml(axis.improvePoints || "")}</p>
   `;
   return card;
+}
+
+// Aのときの花火（紙吹雪）演出。ライブラリが読み込めない環境では何もしない
+function celebrate() {
+  if (typeof confetti !== "function") return;
+  const colors = ["#1dd1a1", "#feca57", "#ff6b9d", "#54a0ff", "#ffffff"];
+  const burst = (x, y) =>
+    confetti({
+      particleCount: 90,
+      spread: 75,
+      startVelocity: 45,
+      origin: { x, y },
+      colors,
+      scalar: 1.1,
+      ticks: 220,
+    });
+  burst(0.5, 0.45);
+  setTimeout(() => burst(0.25, 0.5), 300);
+  setTimeout(() => burst(0.75, 0.5), 600);
+  setTimeout(() => burst(0.5, 0.35), 1000);
 }
 
 function escapeHtml(text) {
@@ -56,8 +84,10 @@ function escapeHtml(text) {
 
 function renderResults(data) {
   gradeBadge.textContent = data.overallGrade;
-  gradeBadge.className = `grade-badge grade-${data.overallGrade}`;
-  overallComment.textContent = data.overallComment;
+  gradeBadge.className = `grade-badge grade-${data.overallGrade} pop`;
+  gradeLabel.textContent =
+    (data.gradeDescriptions && data.gradeDescriptions[data.overallGrade]) || "";
+  overallComment.textContent = data.overallComment || "";
 
   axesResults.innerHTML = "";
   (data.axes || []).forEach((axis) => {
@@ -70,6 +100,10 @@ function renderResults(data) {
 
   results.classList.remove("hidden");
   results.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if (data.overallGrade === "A") {
+    setTimeout(celebrate, 350);
+  }
 }
 
 async function fetchWithTimeout(url, options) {
